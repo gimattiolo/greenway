@@ -48,10 +48,12 @@ def isProcessTimeTableBody(tag):
 def isProcessTimeTableRow(tag):
 	return tag.name == 'tr'
 
+def isLastUpdated(tag) :	
+	return tag.name == 'p' and 'id' in tag.attrs and tag.attrs['id'] == 'posted' 
+	
 def cleanUpString(s) :
 	s1 = re.sub('[,\t\r\n]+', '', s)
 	s1 = s1.lstrip()
-
 	s1 = s1.rstrip()
 	
 	return s1
@@ -70,12 +72,18 @@ def processRow(row) :
 	for column in columns :
 		# print column
 		info.entries.append(cleanUpString(column.string))
-
+		
 	return info
 	
 def processTables(htmlSoup) :
+
+	postedTags = htmlSoup.find_all(isLastUpdated)
+	if postedTags is None or not len(postedTags) == 1 :
+		return False
 	
-	htmlSoup
+	lastUpdatedStr = cleanUpString(postedTags[0].get_text())
+	print lastUpdatedStr
+	
 	# find table with class='dataTable'
 	# print htmlSoup
 	tables = htmlSoup.find_all(isProcessTimeTable)
