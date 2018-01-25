@@ -5,6 +5,7 @@ import logging
 from bs4 import BeautifulSoup
 from time import sleep
 import urlparse
+from datetime import datetime
 
 import MySQLdb
 
@@ -21,7 +22,7 @@ rootUrl = 'https://egov.uscis.gov'
 class RowInfo :
 	application = u''
 	description = u''
-	date = u''
+	date = datetime.today()
 	
 
 def makeSoup(response) :
@@ -39,24 +40,27 @@ def isProcessTimeTableBody(tag):
 def isProcessTimeTableRow(tag):
 	return tag.name == 'tr'
 
-def removeSpecialChar(s) :
-	re.sub('[\t\r\n]+', '', s)
+def cleanUpString(s) :
+	s1 = re.sub('[,\t\r\n]+', '', s)
+	s1 = s1.lstrip()
+
+	s1 = s1.rstrip()
+	
+	return s1
 	
 def processRow(row):
 
 	info = RowInfo()
-	info.application = row.th.string
-	# removeSpecialChar(info.application)
-	info.description = row.td.string
-	# removeSpecialChar(info.description)
-	info.date = row.td.find_next_sibling('td').string
-	# removeSpecialChar(info.date)
 
-	temp = [str(info.application)]
-	print temp[0]
-	print removeSpecialChar(temp[0])
+	info.application = cleanUpString(row.th.string)
+	
+	info.description = cleanUpString(row.td.string)
+
+	dateStr = cleanUpString(row.td.find_next_sibling('td').string)
+	datetimeObject = datetime.strptime(dateStr, '%B %d %Y')
+	info.date = datetimeObject
+	
 	return info
-
 	
 def processTables(htmlSoup) :
 	
@@ -70,6 +74,9 @@ def processTables(htmlSoup) :
 			rows = body.find_all(isProcessTimeTableRow)
 			for row in rows :
 				info = processRow(row)
+				print info.application
+				print info.description
+				print info.date
 		
 
 def processUrl(url) :
@@ -141,13 +148,13 @@ def main() :
 	htmlSoup = makeSoup(response)
 	forms = htmlSoup.find_all(isProcessTimesForm)
 	
-	
+
 	
 	
 	for form in forms :
 		ans = processForm(form)
-		if ans : 	
-			break
+		# if ans : 
+			# break
 	# Disconnessione
 	# db.close()
 		
