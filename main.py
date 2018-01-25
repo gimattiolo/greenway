@@ -68,7 +68,7 @@ def processTables(htmlSoup) :
 	tables = htmlSoup.find_all(isProcessTimeTable)
 	for table in tables :
 		caption = table.caption.get_text()
-		print caption	
+		print 'Caption: ' + caption	
 		bodies = table.find_all(isProcessTimeTableBody)
 		for body in bodies :
 			rows = body.find_all(isProcessTimeTableRow)
@@ -116,7 +116,6 @@ def processForm(form) :
 		url += selectionName + '=' + option['value'] + '&'
 		url += submitInput['name'] + '=' + submitInput['value'].replace(' ', '+')	
 		processUrl(url)
-		return True
 		
 	return True
 
