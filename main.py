@@ -18,22 +18,79 @@ initUrl = 'https://egov.uscis.gov/cris/processTimesDisplayInit.do'
 
 rootUrl = 'https://egov.uscis.gov'
 
+class RowInfo :
+	application = u''
+	description = u''
+	date = u''
+	
+
+def makeSoup(response) :
+	responseRead = response.read()
+	soup = BeautifulSoup(responseRead, "lxml")
+	return soup
+
+	
+def isProcessTimeTable(tag):
+	return tag.name == 'table' and 'class' in tag.attrs and tag['class'] == ['dataTable']
+
+def isProcessTimeTableBody(tag):
+	return tag.name == 'tbody' 
+	
+def isProcessTimeTableRow(tag):
+	return tag.name == 'tr'
+
+def removeSpecialChar(s) :
+	re.sub('[\t\r\n]+', '', s)
+	
+def processRow(row):
+
+	info = RowInfo()
+	info.application = row.th.string
+	# removeSpecialChar(info.application)
+	info.description = row.td.string
+	# removeSpecialChar(info.description)
+	info.date = row.td.find_next_sibling('td').string
+	# removeSpecialChar(info.date)
+
+	temp = [str(info.application)]
+	print temp[0]
+	print removeSpecialChar(temp[0])
+	return info
+
+	
+def processTables(htmlSoup) :
+	
+	# find table with class='dataTable'
+	tables = htmlSoup.find_all(isProcessTimeTable)
+	for table in tables :
+		caption = table.caption.get_text()
+		print caption	
+		bodies = table.find_all(isProcessTimeTableBody)
+		for body in bodies :
+			rows = body.find_all(isProcessTimeTableRow)
+			for row in rows :
+				info = processRow(row)
+		
+
 def processUrl(url) :
 	print 'Processing url ' + url
-	# request = mechanize.Request(url)
-	# response = mechanize.urlopen(request)
+	request = mechanize.Request(url)
+	response = mechanize.urlopen(request)
+	htmlSoup = makeSoup(response)
+	
+	processTables(htmlSoup)
 
 def processForm(form) :
 
-	print 'Processing form :' 
-	print form.attrs
+	# print 'Processing form :' 
+	# print form.attrs
 	
 	
 
 	submitInput = form.find(isSubmitInput)
 
 	if submitInput is None :
-		return
+		return False
 
 	selectForm = form.find('select')
 
@@ -52,6 +109,9 @@ def processForm(form) :
 		url += selectionName + '=' + option['value'] + '&'
 		url += submitInput['name'] + '=' + submitInput['value'].replace(' ', '+')	
 		processUrl(url)
+		return True
+		
+	return True
 
 def isProcessTimesForm(tag):
 	return tag.name == 'form' and tag['name'] == 'processTimesForm'
@@ -62,34 +122,33 @@ def isSubmitInput(tag):
 def main() :
 
 	# Connessione al Database
-	db = MySQLdb.connect("localhost","root","greenway", "greenway")
+	# db = MySQLdb.connect("localhost","root","greenway", "greenway")
 	 
 	# Ottenimento del cursore
-	cursor = db.cursor()
+	# cursor = db.cursor()
 	 
 	# Esecuzione di una query SQL
-	cursor.execute("SELECT VERSION()")
+	# cursor.execute("SELECT VERSION()")
 	 
 	# Lettura di una singola riga dei risultati della query
-	data = cursor.fetchone()
+	# data = cursor.fetchone()
 	 
-	print "Database version : %s " % data
+	# print "Database version : %s " % data
 	 
 
 	request = mechanize.Request(initUrl)
 	response = mechanize.urlopen(request)
-	responseRead = response.read()
-	soup = BeautifulSoup(responseRead, "lxml")
-	htmlCode = str(soup)
-	forms = soup.find_all(isProcessTimesForm)
+	htmlSoup = makeSoup(response)
+	forms = htmlSoup.find_all(isProcessTimesForm)
 	
 	
 	
 	
 	for form in forms :
-		processForm(form)	
-
+		ans = processForm(form)
+		if ans : 	
+			break
 	# Disconnessione
-	db.close()
+	# db.close()
 		
 main()
