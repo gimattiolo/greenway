@@ -20,19 +20,27 @@ initUrl = 'https://egov.uscis.gov/cris/processTimesDisplayInit.do'
 rootUrl = 'https://egov.uscis.gov'
 
 class RowInfo :
-	application = u''
-	description = u''
-	date = datetime.today()
-	
-
+	def __init__(self):
+		self.header = u''
+		self.entries = []
+		
 def makeSoup(response) :
 	responseRead = response.read()
 	soup = BeautifulSoup(responseRead, "lxml")
 	return soup
 
-	
+def isTableColumn(tag) :
+	return tag.name == 'td'	
+
+def isTable(tag) :
+	return tag.name == 'table'
+
+def hasCaption(tag) :
+	# check it is a direct child
+	return len([x for x in tag.contents if x.name == 'caption']) > 0 
+
 def isProcessTimeTable(tag):
-	return tag.name == 'table' and 'class' in tag.attrs and tag['class'] == ['dataTable']
+	return isTable(tag) and hasCaption(tag)
 
 def isProcessTimeTableBody(tag):
 	return tag.name == 'tbody' 
@@ -48,35 +56,66 @@ def cleanUpString(s) :
 	
 	return s1
 	
-def processRow(row):
-
+def processRow(row) :
 	info = RowInfo()
 
-	info.application = cleanUpString(row.th.string)
-	
-	info.description = cleanUpString(row.td.string)
+	info.header = cleanUpString(row.th.string)
 
-	dateStr = cleanUpString(row.td.find_next_sibling('td').string)
-	datetimeObject = datetime.strptime(dateStr, '%B %d %Y')
-	info.date = datetimeObject
+	columns = row.find_all(isTableColumn)
 	
+	if len(columns) <= 0 :
+		print 'No columns!'
+		return None
+	
+	for column in columns :
+		# print column
+		info.entries.append(cleanUpString(column.string))
+
 	return info
 	
 def processTables(htmlSoup) :
 	
+	htmlSoup
 	# find table with class='dataTable'
+	# print htmlSoup
 	tables = htmlSoup.find_all(isProcessTimeTable)
+
+	if len(tables) <= 0 :
+		print 'No tables!'
+		return False
+	
 	for table in tables :
 		caption = table.caption.get_text()
 		print 'Caption: ' + caption	
 		bodies = table.find_all(isProcessTimeTableBody)
+
+		if len(bodies) <= 0 :
+			print 'No bodies!'
+			return False
+
 		for body in bodies :
 			rows = body.find_all(isProcessTimeTableRow)
+
+			if len(rows) <= 0 :
+				print 'No rows!'
+				return False
+
 			for row in rows :
+				# print row
+
 				info = processRow(row)
-				print info.application
-				print info.description
-				print info.date
+				
+				# dateStr = cleanUpString(row.td.find_next_sibling('td').string)
+				# datetimeObject = datetime.strptime(dateStr, '%B %d %Y')
+				# info.date = datetimeObject
+
+				if info is None :
+					return False
+				
+				print info.header
+				print info.entries
+	
+	return True
 		
 
 def processUrl(url) :
@@ -85,7 +124,7 @@ def processUrl(url) :
 	response = mechanize.urlopen(request)
 	htmlSoup = makeSoup(response)
 	
-	processTables(htmlSoup)
+	return processTables(htmlSoup)
 
 def processForm(form) :
 
@@ -115,7 +154,8 @@ def processForm(form) :
 		# print option
 		url += selectionName + '=' + option['value'] + '&'
 		url += submitInput['name'] + '=' + submitInput['value'].replace(' ', '+')	
-		processUrl(url)
+		if not processUrl(url) :
+			return False
 		
 	return True
 
@@ -127,16 +167,12 @@ def isSubmitInput(tag):
 	
 def main() :
 
-	# Connessione al Database
 	# db = MySQLdb.connect("localhost","root","greenway", "greenway")
 	 
-	# Ottenimento del cursore
 	# cursor = db.cursor()
 	 
-	# Esecuzione di una query SQL
 	# cursor.execute("SELECT VERSION()")
 	 
-	# Lettura di una singola riga dei risultati della query
 	# data = cursor.fetchone()
 	 
 	# print "Database version : %s " % data
@@ -151,10 +187,9 @@ def main() :
 	
 	
 	for form in forms :
-		ans = processForm(form)
-		# if ans : 
-			# break
-	# Disconnessione
+		if not processForm(form) :
+			return
+
 	# db.close()
 		
 main()
