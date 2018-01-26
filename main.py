@@ -75,14 +75,13 @@ def processRow(row) :
 		
 	return info
 	
-def processTables(htmlSoup) :
+def processTables(htmlSoup, locationId) :
 
 	postedTags = htmlSoup.find_all(isLastUpdated)
 	if postedTags is None or not len(postedTags) == 1 :
 		return False
 	
 	lastUpdatedStr = cleanUpString(postedTags[0].get_text())
-	print lastUpdatedStr
 	
 	# find table with class='dataTable'
 	# print htmlSoup
@@ -120,19 +119,22 @@ def processTables(htmlSoup) :
 				if info is None :
 					return False
 				
-				print info.header
-				print info.entries
-	
+				firstIndex = 0
+				lastIndex = len(info.entries) - 1
+				print 'DB ID : ' + locationId + ' / ' + info.header + ' / ' + str(info.entries[firstIndex : lastIndex])
+				print 'DB last update date : ' + lastUpdatedStr
+				print 'DB date : ' + info.entries[lastIndex]
+				
 	return True
 		
 
-def processUrl(url) :
+def processUrl(url, locationId) :
 	print 'Processing url ' + url
 	request = mechanize.Request(url)
 	response = mechanize.urlopen(request)
 	htmlSoup = makeSoup(response)
 	
-	return processTables(htmlSoup)
+	return processTables(htmlSoup, locationId)
 
 def processForm(form) :
 
@@ -160,9 +162,10 @@ def processForm(form) :
 	for option in options :
 		url = baseUrl  
 		# print option
-		url += selectionName + '=' + option['value'] + '&'
+		locationId = option['value']
+		url += selectionName + '=' + locationId + '&'
 		url += submitInput['name'] + '=' + submitInput['value'].replace(' ', '+')	
-		if not processUrl(url) :
+		if not processUrl(url, locationId) :
 			return False
 		
 	return True
@@ -173,8 +176,50 @@ def isProcessTimesForm(tag):
 def isSubmitInput(tag):
 	return tag.name == 'input' and tag['type'] == 'submit'
 	
-def main() :
+def createTables(forms) :
+	for form in forms :
+		submitInput = form.find(isSubmitInput)
 
+		if submitInput is None :
+			return False
+
+		selectForm = form.find('select')
+		
+		selectionName = ''
+		options = []
+		if not selectForm is None :
+			selectionName = selectForm['name']
+			options = selectForm.find_all('option')
+			
+		for option in options :
+			locationId = option['value'];
+			locationName = option.get_text()
+			# print locationId
+			# print locationName
+			
+
+def initDB() :
+	# db = MySQLdb.connect("localhost","root","greenway", "greenway")
+	 
+	# cursor = db.cursor()
+	 
+	# cursor.execute("SELECT VERSION()")
+	 
+	# data = cursor.fetchone()
+	 
+	# print "Database version : %s " % data
+	 
+
+	request = mechanize.Request(initUrl)
+	response = mechanize.urlopen(request)
+	htmlSoup = makeSoup(response)
+	forms = htmlSoup.find_all(isProcessTimesForm)
+
+	createTables(forms)
+	
+	# db.close()
+
+def updateDB() :
 	# db = MySQLdb.connect("localhost","root","greenway", "greenway")
 	 
 	# cursor = db.cursor()
@@ -199,5 +244,10 @@ def main() :
 			return
 
 	# db.close()
+		
+	
+def main() :
+
+	updateDB()
 		
 main()
