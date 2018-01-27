@@ -5,9 +5,16 @@ import logging
 from bs4 import BeautifulSoup
 from time import sleep
 import urlparse
-from datetime import datetime
+import datetime
 
 import MySQLdb
+
+dbHost = "localhost"
+dbUser = "root"
+dbPassaword = "10sp3r14m0ch3m3l4c4v0!"
+dbName = "MySQL"
+
+db = MySQLdb.connect(dbHost, dbUser, dbPassaword, dbName)
 
 mechanizeLog = logging.getLogger('mechanize')
 mechanizeLog.addHandler(logging.StreamHandler(sys.stdout))
@@ -19,7 +26,11 @@ initUrl = 'https://egov.uscis.gov/cris/processTimesDisplayInit.do'
 
 rootUrl = 'https://egov.uscis.gov'
 
+
+
+
 class RowInfo :
+	MaxEntries = 3
 	def __init__(self):
 		self.header = u''
 		self.entries = []
@@ -52,11 +63,20 @@ def isLastUpdated(tag) :
 	return tag.name == 'p' and 'id' in tag.attrs and tag.attrs['id'] == 'posted' 
 	
 def cleanUpString(s) :
-	s1 = re.sub('[,\t\r\n]+', '', s)
-	s1 = s1.lstrip()
-	s1 = s1.rstrip()
+	s = re.sub('[,\t\r\n]+', '', s)
+	s = s.lstrip()
+	s = s.rstrip()
 	
-	return s1
+	return s
+
+def cleanUpLastUpdated(s) :
+	s = cleanUpString(s)
+	index = s.find(':')
+	s = s[index + 1 : ]
+	s = s.lstrip()
+	s = s.rstrip()
+	return s
+	
 	
 def processRow(row) :
 	info = RowInfo()
@@ -72,16 +92,21 @@ def processRow(row) :
 	for column in columns :
 		# print column
 		info.entries.append(cleanUpString(column.string))
-		
+	
+	if len(info.entries) < RowInfo.MaxEntries :
+		info.entries.insert(len(info.entries) - 1, 'N/A')
+	
 	return info
 	
 def processTables(htmlSoup, locationId) :
+
+	insertTimeEntryQuery = """INSERT INTO TimeEntries VALUES ({0}, \'{1}\', \'{2}\', \'{3}\', \'{4}\', \'{5}\', \'{6}\');"""
 
 	postedTags = htmlSoup.find_all(isLastUpdated)
 	if postedTags is None or not len(postedTags) == 1 :
 		return False
 	
-	lastUpdatedStr = cleanUpString(postedTags[0].get_text())
+	pageLastUpdatedStr = cleanUpLastUpdated(postedTags[0].get_text())
 	
 	# find table with class='dataTable'
 	# print htmlSoup
@@ -93,7 +118,11 @@ def processTables(htmlSoup, locationId) :
 	
 	for table in tables :
 		caption = table.caption.get_text()
-		print 'Caption: ' + caption	
+		lastUpdatedStr = cleanUpLastUpdated(caption)
+
+		# print 'Caption: ' + caption	
+
+
 		bodies = table.find_all(isProcessTimeTableBody)
 
 		if len(bodies) <= 0 :
@@ -112,7 +141,6 @@ def processTables(htmlSoup, locationId) :
 
 				info = processRow(row)
 				
-				# dateStr = cleanUpString(row.td.find_next_sibling('td').string)
 				# datetimeObject = datetime.strptime(dateStr, '%B %d %Y')
 				# info.date = datetimeObject
 
@@ -121,10 +149,21 @@ def processTables(htmlSoup, locationId) :
 				
 				firstIndex = 0
 				lastIndex = len(info.entries) - 1
-				print 'DB ID : ' + locationId + ' / ' + info.header + ' / ' + str(info.entries[firstIndex : lastIndex])
-				print 'DB last update date : ' + lastUpdatedStr
-				print 'DB date : ' + info.entries[lastIndex]
 				
+				# print 'DB ID : ' + locationId + ' / ' + info.header + ' / ' + str(info.entries[firstIndex : lastIndex])
+				# print 'DB date : ' + info.entries[lastIndex]
+				# print 'DB last update date : ' + lastUpdatedStr
+				# print 'DB page last update date : ' + pageLastUpdatedStr
+				
+				q = insertTimeEntryQuery.format(locationId, info.header, info.entries[0], info.entries[1], datetime.datetime.strptime(info.entries[2], '%B %d %Y').strftime('%Y-%m-%d'), datetime.datetime.strptime(lastUpdatedStr, '%B %d %Y').strftime('%Y-%m-%d'), datetime.datetime.strptime(pageLastUpdatedStr, '%B %d %Y').strftime('%Y-%m-%d'))
+				
+				# print  q
+				
+				try :	
+					db.query(q)
+				except MySQLdb.MySQLError:
+					print("Unexpected error:", sys.exc_info())
+					continue
 	return True
 		
 
@@ -177,6 +216,31 @@ def isSubmitInput(tag):
 	return tag.name == 'input' and tag['type'] == 'submit'
 	
 def createTables(forms) :
+	
+	# SQL DATE - format YYYY-MM-DD
+	# SQL DATETIME - format: YYYY-MM-DD HH:MI:SS
+	
+	createLocationsTableQuery = """CREATE TABLE Locations (LocationId int NOT NULL PRIMARY KEY, LocationName varchar(255));"""
+	try :
+		db.query(createLocationsTableQuery)
+	except MySQLdb.MySQLError:
+		print("Unexpected error:", sys.exc_info())
+		raise
+
+	createTimeEntriesTableQuery = """CREATE TABLE TimeEntries (LocationId int NOT NULL, Form varchar(255) NOT NULL, Description1 varchar(255) NOT NULL, Description2 varchar(255) NOT NULL, ProcessingDate DATE, LastUpdateDate DATE, PageLastUpdateDate DATE, CONSTRAINT TimeEntries PRIMARY KEY (LocationId, Form, Description1, Description2));"""
+	print createTimeEntriesTableQuery
+	try :
+		db.query(createTimeEntriesTableQuery)
+	except MySQLdb.MySQLError:
+		print("Unexpected error:", sys.exc_info())
+		raise
+
+
+def fillLocationsTable(forms) :
+		
+	insertLocationQuery = """INSERT INTO Locations VALUES ({0}, \'{1}\');"""	
+	
+
 	for form in forms :
 		submitInput = form.find(isSubmitInput)
 
@@ -194,20 +258,27 @@ def createTables(forms) :
 		for option in options :
 			locationId = option['value'];
 			locationName = option.get_text()
+			
 			# print locationId
 			# print locationName
 			
+			try :
+				print insertLocationQuery.format(locationId, locationName)
+				db.query(insertLocationQuery.format(locationId, locationName))
+			except MySQLdb.MySQLError:
+				print("Unexpected error:", sys.exc_info())
+				continue
 
 def initDB() :
-	# db = MySQLdb.connect("localhost","root","greenway", "greenway")
+	
 	 
-	# cursor = db.cursor()
+	cursor = db.cursor()
 	 
-	# cursor.execute("SELECT VERSION()")
+	cursor.execute("SELECT VERSION()")
 	 
-	# data = cursor.fetchone()
+	data = cursor.fetchone()
 	 
-	# print "Database version : %s " % data
+	print "Database version : %s " % data
 	 
 
 	request = mechanize.Request(initUrl)
@@ -215,20 +286,22 @@ def initDB() :
 	htmlSoup = makeSoup(response)
 	forms = htmlSoup.find_all(isProcessTimesForm)
 
-	createTables(forms)
+	# createTables(forms)
+	fillLocationsTable(forms)
+		
+	db.commit()
 	
-	# db.close()
+	db.close()
 
 def updateDB() :
-	# db = MySQLdb.connect("localhost","root","greenway", "greenway")
 	 
-	# cursor = db.cursor()
+	cursor = db.cursor()
 	 
-	# cursor.execute("SELECT VERSION()")
+	cursor.execute("SELECT VERSION()")
 	 
-	# data = cursor.fetchone()
+	data = cursor.fetchone()
 	 
-	# print "Database version : %s " % data
+	print "Database version : %s " % data
 	 
 
 	request = mechanize.Request(initUrl)
@@ -243,11 +316,16 @@ def updateDB() :
 		if not processForm(form) :
 			return
 
-	# db.close()
+	# print datetime.date(1900, 1 , 1).strftime('%B %d %Y')
+			
+			
+	db.commit()
+	db.close()
 		
 	
 def main() :
 
+	# initDB()
 	updateDB()
 		
 main()
