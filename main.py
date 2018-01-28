@@ -6,6 +6,8 @@ from bs4 import BeautifulSoup
 from time import sleep
 import urlparse
 import datetime
+import traceback
+
 
 import MySQLdb
 
@@ -26,8 +28,12 @@ initUrl = 'https://egov.uscis.gov/cris/processTimesDisplayInit.do'
 
 rootUrl = 'https://egov.uscis.gov'
 
+updateTimeEntries = False
 
+x = 0
 
+# how=1 means, return it as a dictionary, where the keys are the column names, or table.column if there are two columns with the same name (say, from a join). how=2 means the same as how=1 except that the keys are always table.column; this is for compatibility with the old Mysqldb module.
+fetchRowHow = 0
 
 class RowInfo :
 	MaxEntries = 3
@@ -100,8 +106,18 @@ def processRow(row) :
 	
 def processTables(htmlSoup, locationId) :
 
-	insertTimeEntryQuery = """INSERT INTO TimeEntries VALUES ({0}, \'{1}\', \'{2}\', \'{3}\', \'{4}\', \'{5}\', \'{6}\');"""
+	global updateTimeEntries
 
+	getCategoryIdQuery = """SELECT CategoryId FROM Categories WHERE Form = \'{0}\' AND Description1 = \'{1}\' AND Description2 = \'{2}\' LIMIT 1;"""
+
+	insertCategoryEntryQuery = """INSERT INTO Categories (Form, Description1, Description2) VALUES (\'{0}\', \'{1}\', \'{2}\');"""
+
+	getTimeEntryQuery = """SELECT EntryId FROM TimeEntries WHERE CategoryId = {0} AND LocationId = {1} AND ProcessingDate = \'{2}\' AND LastUpdateDate = \'{3}\' AND PageLastUpdateDate = \'{4}\' LIMIT 1;"""
+
+	
+	insertTimeEntryQuery = """INSERT INTO TimeEntries (CategoryId, LocationId, ProcessingDate, LastUpdateDate, PageLastUpdateDate) VALUES ({0}, {1}, \'{2}\', \'{3}\', \'{4}\');"""
+
+	
 	postedTags = htmlSoup.find_all(isLastUpdated)
 	if postedTags is None or not len(postedTags) == 1 :
 		return False
@@ -147,6 +163,8 @@ def processTables(htmlSoup, locationId) :
 				if info is None :
 					return False
 				
+				
+				
 				firstIndex = 0
 				lastIndex = len(info.entries) - 1
 				
@@ -154,16 +172,53 @@ def processTables(htmlSoup, locationId) :
 				# print 'DB date : ' + info.entries[lastIndex]
 				# print 'DB last update date : ' + lastUpdatedStr
 				# print 'DB page last update date : ' + pageLastUpdatedStr
-				
-				q = insertTimeEntryQuery.format(locationId, info.header, info.entries[0], info.entries[1], datetime.datetime.strptime(info.entries[2], '%B %d %Y').strftime('%Y-%m-%d'), datetime.datetime.strptime(lastUpdatedStr, '%B %d %Y').strftime('%Y-%m-%d'), datetime.datetime.strptime(pageLastUpdatedStr, '%B %d %Y').strftime('%Y-%m-%d'))
-				
-				# print  q
-				
+
+
 				try :	
+					# get categoryId
+					q = getCategoryIdQuery.format(info.header, info.entries[0], info.entries[1])
 					db.query(q)
+					f = db.store_result()
+					r = f.fetch_row(1, fetchRowHow)
+
+					categoryId = None
+					if len(r) > 0 :
+						categoryId = r[0][0]
+					
+					if categoryId is None :
+
+						q = insertCategoryEntryQuery.format(info.header, info.entries[0], info.entries[1])
+						db.query(q)
+
+						q = getCategoryIdQuery.format(info.header, info.entries[0], info.entries[1])
+						db.query(q)
+						f = db.store_result()
+						r = f.fetch_row(1, fetchRowHow)
+
+						if len(r) <= 0 :
+							print 'Warning : Unable to find category for query ' + q
+							continue
+							
+						categoryId = r[0][0]
+				
+					if updateTimeEntries :
+					
+						q = getTimeEntryQuery.format(categoryId, locationId, datetime.datetime.strptime(info.entries[2], '%B %d %Y').strftime('%Y-%m-%d'), datetime.datetime.strptime(lastUpdatedStr, '%B %d %Y').strftime('%Y-%m-%d'), datetime.datetime.strptime(pageLastUpdatedStr, '%B %d %Y').strftime('%Y-%m-%d'))
+						db.query(q)
+						f = db.store_result()
+						r = f.fetch_row(1, fetchRowHow)
+
+						if len(r) > 0 :
+							print 'Warning : Found existing entry for query ' + q
+							continue
+					
+						q = insertTimeEntryQuery.format(categoryId, locationId, datetime.datetime.strptime(info.entries[2], '%B %d %Y').strftime('%Y-%m-%d'), datetime.datetime.strptime(lastUpdatedStr, '%B %d %Y').strftime('%Y-%m-%d'), datetime.datetime.strptime(pageLastUpdatedStr, '%B %d %Y').strftime('%Y-%m-%d'))
+						db.query(q)
+	
 				except MySQLdb.MySQLError:
 					print("Unexpected error:", sys.exc_info())
 					continue
+					
 	return True
 		
 
@@ -215,19 +270,29 @@ def isProcessTimesForm(tag):
 def isSubmitInput(tag):
 	return tag.name == 'input' and tag['type'] == 'submit'
 	
-def createTables(forms) :
+def createTables() :
 	
 	# SQL DATE - format YYYY-MM-DD
 	# SQL DATETIME - format: YYYY-MM-DD HH:MI:SS
 	
-	createLocationsTableQuery = """CREATE TABLE Locations (LocationId int NOT NULL PRIMARY KEY, LocationName varchar(255));"""
+	# createLocationsTableQuery = """CREATE TABLE Locations (LocationId int NOT NULL PRIMARY KEY, LocationName varchar(255));"""
+	# try :
+		# db.query(createLocationsTableQuery)
+	# except MySQLdb.MySQLError:
+		# print("Unexpected error:", sys.exc_info())
+		# raise
+		
+	createCategoriesTableQuery = """CREATE TABLE Categories (CategoryId int NOT NULL AUTO_INCREMENT, Form varchar(255), Description1 varchar(255), Description2 varchar(255), PRIMARY KEY (CategoryId));"""
+	print createCategoriesTableQuery
 	try :
-		db.query(createLocationsTableQuery)
+		db.query(createCategoriesTableQuery)
 	except MySQLdb.MySQLError:
 		print("Unexpected error:", sys.exc_info())
 		raise
-
-	createTimeEntriesTableQuery = """CREATE TABLE TimeEntries (LocationId int NOT NULL, Form varchar(255) NOT NULL, Description1 varchar(255) NOT NULL, Description2 varchar(255) NOT NULL, ProcessingDate DATE, LastUpdateDate DATE, PageLastUpdateDate DATE, CONSTRAINT TimeEntries PRIMARY KEY (LocationId, Form, Description1, Description2));"""
+	
+		
+		
+	createTimeEntriesTableQuery = """CREATE TABLE TimeEntries (EntryId int NOT NULL AUTO_INCREMENT, CategoryId int NOT NULL, LocationId int NOT NULL, ProcessingDate DATE NOT NULL, LastUpdateDate DATE NOT NULL, PageLastUpdateDate DATE NOT NULL, PRIMARY KEY (EntryId));"""
 	print createTimeEntriesTableQuery
 	try :
 		db.query(createTimeEntriesTableQuery)
@@ -235,6 +300,8 @@ def createTables(forms) :
 		print("Unexpected error:", sys.exc_info())
 		raise
 
+	
+		
 
 def fillLocationsTable(forms) :
 		
@@ -269,63 +336,48 @@ def fillLocationsTable(forms) :
 				print("Unexpected error:", sys.exc_info())
 				continue
 
-def initDB() :
-	
-	 
-	cursor = db.cursor()
-	 
-	cursor.execute("SELECT VERSION()")
-	 
-	data = cursor.fetchone()
-	 
-	print "Database version : %s " % data
-	 
+def initDB(creation) :
+
+	global updateTimeEntries
 
 	request = mechanize.Request(initUrl)
 	response = mechanize.urlopen(request)
 	htmlSoup = makeSoup(response)
 	forms = htmlSoup.find_all(isProcessTimesForm)
 
-	# createTables(forms)
-	fillLocationsTable(forms)
-		
-	db.commit()
-	
-	db.close()
+	if creation :
+		createTables()
+	else :
+		fillLocationsTable(forms)
+		updateTimeEntries = False
+		processForms()
 
-def updateDB() :
-	 
-	cursor = db.cursor()
-	 
-	cursor.execute("SELECT VERSION()")
-	 
-	data = cursor.fetchone()
-	 
-	print "Database version : %s " % data
-	 
+def processForms() :
 
 	request = mechanize.Request(initUrl)
 	response = mechanize.urlopen(request)
 	htmlSoup = makeSoup(response)
 	forms = htmlSoup.find_all(isProcessTimesForm)
-	
-
-	
 	
 	for form in forms :
 		if not processForm(form) :
 			return
+			
+def main() :
+	global updateTimeEntries
 
-	# print datetime.date(1900, 1 , 1).strftime('%B %d %Y')
-			
-			
+	cursor = db.cursor()
+	cursor.execute("SELECT VERSION()")
+	data = cursor.fetchone()
+	print "Database version : %s " % data
+
+	# creation = True
+	# initDB(creation)
+	
+	updateTimeEntries = True
+	processForms()
+	
 	db.commit()
 	db.close()
-		
-	
-def main() :
-
-	# initDB()
-	updateDB()
 		
 main()
