@@ -83,6 +83,8 @@ def cleanUpLastUpdated(s) :
 def processRow(row) :
 	info = RowInfo()
 
+	print "Processing row : " + row.th.string
+	print str(row) + " - " + str(row.th)	+ " - " + str(row.th.string)
 	info.header = cleanUpString(row.th.string)
 
 	columns = row.find_all(isTableColumn)
@@ -204,7 +206,7 @@ def processTables(htmlSoup, locationId) :
 		
 
 def processUrl(url, locationId) :
-	print 'Processing url ' + url
+	# print 'Processing url ' + url
 	request = mechanize.Request(url)
 	response = mechanize.urlopen(request)
 	htmlSoup = makeSoup(response)
@@ -213,13 +215,13 @@ def processUrl(url, locationId) :
 
 def processForm(form) :
 	# print 'Processing form :' 
-	# print form.attrs
+	# print form
 
 	submitInput = form.find(isSubmitInput)
-
+	
 	if submitInput is None :
 		return False
-
+		
 	selectForm = form.find('select')
 	
 	selectionName = ''
@@ -230,14 +232,22 @@ def processForm(form) :
 
 	baseUrl = rootUrl 
 	baseUrl += form['action'] + '?'
-	for option in options :
+	
+	if len(options) <= 0 :
 		url = baseUrl  
 		# print option
-		locationId = option['value']
-		url += selectionName + '=' + locationId + '&'
 		url += submitInput['name'] + '=' + submitInput['value'].replace(' ', '+')	
-		if not processUrl(url, locationId) :
+		if not processUrl(url, -1) :
 			return False
+	else :
+		for option in options :
+			url = baseUrl  
+			# print option
+			locationId = option['value']
+			url += selectionName + '=' + locationId + '&'
+			url += submitInput['name'] + '=' + submitInput['value'].replace(' ', '+')	
+			if not processUrl(url, locationId) :
+				return False
 		
 	return True
 
@@ -328,7 +338,9 @@ def processForms() :
 	
 	for form in forms :
 		if not processForm(form) :
-			return
+			print "Unable to process form :"
+			print form
+			continue
 			
 def main() :
 	global updateTimeEntries
